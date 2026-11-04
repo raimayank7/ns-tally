@@ -1,0 +1,30 @@
+{
+ "id": "/",
+ "name": "Nivesh Sahayak Tally Export",
+ "short_name": "NS Tally Export",
+ "description": "Free TallyPrime import file maker",
+ "start_url": "/",
+ "scope": "/",
+ "display": "standalone",
+ "background_color": "#F6F8FB",
+ "theme_color": "#0B3B5B",
+ "lang": "en-IN",
+ "icons": [
+  {
+   "src": "/icons/icon-192.png",
+   "sizes": "192x192",
+   "type": "image/png"
+  },
+  {
+   "src": "/icons/icon-512.png",
+   "sizes": "512x512",
+   "type": "image/png"
+  },
+  {
+   "src": "/icons/maskable-512.png",
+   "sizes": "512x512",
+   "type": "image/png",
+   "purpose": "maskable"
+  }
+ ]
+}
