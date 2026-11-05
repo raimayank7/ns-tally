@@ -14,6 +14,10 @@
      exp                         expense; mode 'credit' = not paid yet (we owe the payee)
      ob                          opening balance: side 'recv' (a party owes us), 'pay' (we owe a party), 'cash' or 'bank' (no party)
      contra                      cash deposited in the bank (from 'cash', to 'bank') or withdrawn (from 'bank', to 'cash')
+     jv                          journal entry (Batch 2): lines [{ a, party, side, dr, cr }] typed by the user, each line goes to account a
+                                 (a 'party' = the party's account; side 'recv' customer / 'pay' supplier decides how bill-wise dues read it)
+     fa kind 'buy' / 'sale'      fixed asset bought (Dr fa:<asset>, GST credit if itc) / sold (Cr the book value bv saved on the record,
+                                 the difference is profit or loss on sale); mode 'credit' = the party (buyer field) is owed / owes
    chq: { date, bank, st, on } on a receipt or voucher paid by cheque: st 'hand' (received, not deposited), 'dep' (deposited),
      'iss' (issued by us), 'ok' (cleared on date 'on'), 'bounce' (bounced: the record is left out of the books, so its bills are due again).
      Until it clears, the money sits in 'chq-in' (cheques received) or 'chq-out' (cheques issued) instead of 'bank'.
@@ -45,12 +49,52 @@
       o.taxable += taxable;
       if (intra) { o.cgst += tax / 2; o.sgst += tax / 2; } else o.igst += tax;
     });
+    /* extra charges (freight, packing, insurance): part of the taxable value; GST at the main item's rate or their own rate */
+    var main = mainRate(d);
+    (d.charges || []).forEach(function (c) {
+      var amt = r2(num(c.amt)); if (!amt) return;
+      var tax = noTax ? 0 : r2(amt * (c.gst === '' || c.gst == null || c.gst === 'main' ? main : num(c.gst)) / 100);
+      o.taxable += amt;
+      if (intra) { o.cgst += tax / 2; o.sgst += tax / 2; } else o.igst += tax;
+    });
     o.taxable = r2(o.taxable); o.cgst = r2(o.cgst); o.sgst = r2(o.sgst); o.igst = r2(o.igst);
-    var total = r2(o.taxable + o.cgst + o.sgst + o.igst);
+    /* TCS (income-tax, collected by the seller): on the total with GST or on the taxable value, as chosen on the bill */
+    o.tcs = d.tcs && d.tcs.on ? r2((d.tcs.base === 'taxable' ? o.taxable : o.taxable + o.cgst + o.sgst + o.igst) * tcsRate(d) / 100) : 0;
+    var total = r2(o.taxable + o.cgst + o.sgst + o.igst + o.tcs);
     o.total = d.total != null && d.total !== '' ? num(d.total) : total;
     o.round = r2(o.total - total);
     o.ut = !buy && UT[origin] && intra;
     return o;
+  }
+
+  /* TCS rate that applies on a bill: the rate on the bill, or without a valid PAN of the buyer the higher of twice that rate or 5%, not over 20%
+     (Income-tax Act 2025 s.397(2)(b)(ii)). PAN = tcs.pan, else characters 3-12 of the buyer's GSTIN. Non-residents without a PE: tcs.nopanOk. */
+  function panOk(p) { return /^[A-Z]{5}[0-9]{4}[A-Z]$/.test(String(p || '').toUpperCase()); }
+  function tcsPan(d) { var c = d.tcs || {}, g = String(d.buyer && d.buyer.gstin || '').toUpperCase(); return panOk(c.pan) ? String(c.pan).toUpperCase() : panOk(g.slice(2, 12)) ? g.slice(2, 12) : ''; }
+  function tcsRate(d) {
+    var c = d.tcs || {}, r = num(c.rate);
+    if (!c.on || !r) return 0;
+    return tcsPan(d) || c.nopanOk ? r : Math.min(20, Math.max(2 * r, 5));
+  }
+
+  /* GST rate of the main supply: the item line with the largest taxable value (ancillary charges follow it, CGST Act s.8(a) and s.15(2)(c)) */
+  function mainRate(d) {
+    var best = -1, g = 0;
+    (d.items || []).forEach(function (it) {
+      var q = it.qty === '' || it.qty == null ? 1 : num(it.qty), v = q * num(it.rate) * (1 - num(it.disc) / 100);
+      if ((it.desc || num(it.rate)) && v > best) { best = v; g = num(it.gst); }
+    });
+    return g;
+  }
+
+  /* extra charges as item-like lines (for GSTR-1, GSTR-3B): GST and HSN of the main item unless the charge has its own */
+  function chargeLines(d) {
+    var best = -1, mainIt = null;
+    (d.items || []).forEach(function (it) { var q = it.qty === '' || it.qty == null ? 1 : num(it.qty), v = q * num(it.rate) * (1 - num(it.disc) / 100); if ((it.desc || num(it.rate)) && v > best) { best = v; mainIt = it; } });
+    return (d.charges || []).filter(function (c) { return num(c.amt); }).map(function (c) {
+      var own = !(c.gst === '' || c.gst == null || c.gst === 'main');
+      return { desc: c.name || 'Charges', hsn: own ? c.hsn || '' : mainIt && mainIt.hsn || '', qty: 1, unit: mainIt && mainIt.unit || '', rate: num(c.amt), disc: '', gst: own ? num(c.gst) : mainIt ? num(mainIt.gst) : 0, charge: 1 };
+    });
   }
 
   function partyName(d) { return String(d.buyer && d.buyer.name || '').trim(); }
@@ -74,6 +118,8 @@
       case 'exp': return 'exp';
       case 'ob': return 'ob';
       case 'contra': return 'contra';
+      case 'jv': return 'jv';
+      case 'fa': return d.kind === 'sale' ? 'fasale' : 'fabuy';
     }
     return '';
   }
@@ -90,6 +136,7 @@
       side(partyName(d) ? P : 'p:cash-customer', t.total);
       other(sales, t.taxable);
       other('gst-out-cgst', t.cgst); other(t.ut ? 'gst-out-utgst' : 'gst-out-sgst', t.sgst); other('gst-out-igst', t.igst);
+      other('tcs-payable', t.tcs);
       if (t.round) (t.round > 0 ? other : side)('round-off', Math.abs(t.round));
       /* marked paid on the bill itself (no payment entry linked): money came in on the bill date */
       if (R === 'sale' && d.status === 'paid' && !d.paidBy) { dr(moneyAcct(d.payMode || 'cash'), t.total); cr(partyName(d) ? P : 'p:cash-customer', t.total); }
@@ -112,7 +159,7 @@
         o2('gst-rcm-payable', t.cgst + t.sgst + t.igst); o2(P, t.taxable);
         if (d.status === 'sipaid') { dr(P, t.taxable); cr(moneyAcct(d.payMode || 'cash'), t.taxable); }
       } else {
-        s2('gst-in-cgst', t.cgst); s2('gst-in-sgst', t.sgst); s2('gst-in-igst', t.igst);
+        s2('gst-in-cgst', t.cgst); s2('gst-in-sgst', t.sgst); s2('gst-in-igst', t.igst); s2('tcs-receivable', t.tcs);
         if (t.round) (t.round > 0 ? s2 : o2)('round-off', Math.abs(t.round));
         o2(P, t.total);
       }
@@ -123,6 +170,19 @@
       if (d.mode === 'credit') cr(partyName(d) ? P : 'p:unknown', amt); else cr(moneyAcct(d.mode), amt);
     } else if (R === 'contra') {
       amt = num(d.amount); dr(d.to === 'cash' ? 'cash' : 'bank', amt); cr(d.from === 'bank' ? 'bank' : 'cash', amt);
+    } else if (R === 'jv') {
+      (d.lines || []).forEach(function (l) { var a = jvAcct(l); if (!a) return; dr(a, num(l.dr)); cr(a, num(l.cr)); });
+    } else if (R === 'fabuy') {
+      amt = num(d.amount); var fg = d.itc ? num(d.gstAmt) : 0, fk = 'fa:' + key(d.name || 'Fixed asset');
+      dr(fk, amt + (d.itc ? 0 : num(d.gstAmt)));
+      if (fg) { if (d.inter) dr('gst-in-igst', fg); else { dr('gst-in-cgst', r2(fg / 2)); dr('gst-in-sgst', fg - r2(fg / 2)); } }
+      if (d.mode === 'credit') cr(partyName(d) ? P : 'p:unknown', amt + num(d.gstAmt)); else cr(moneyAcct(d.mode), amt + num(d.gstAmt));
+    } else if (R === 'fasale') {
+      amt = num(d.amount); var bv = num(d.bv), sk = 'fa:' + key(d.name || 'Fixed asset'), sg = num(d.gstAmt);
+      if (d.mode === 'credit') dr(partyName(d) ? P : 'p:unknown', amt + sg); else dr(moneyAcct(d.mode), amt + sg);
+      if (sg) { if (d.inter) cr('gst-out-igst', sg); else { cr('gst-out-cgst', r2(sg / 2)); cr('gst-out-sgst', sg - r2(sg / 2)); } }
+      cr(sk, bv);
+      if (amt > bv) cr('inc:profit on sale of assets', amt - bv); else dr('exp:loss on sale of assets', bv - amt);
     } else if (R === 'ob') {
       amt = num(d.amount);
       if (d.side === 'cash' || d.side === 'bank') { dr(d.side, amt); cr('opening', amt); }   /* cash in hand / bank balance on the start date */
@@ -131,8 +191,18 @@
     return L;
   }
 
+  /* account of one journal line: 'party' = the party's own account, else the account key typed in the line */
+  function jvAcct(l) { if (!l) return ''; if (l.a === 'party') return l.party ? 'p:' + key(l.party) : ''; return String(l.a || '').trim(); }
+  /* every party a record touches: { key: name } (a journal entry can name several) */
+  function partiesOf(d) {
+    var o = {};
+    if (role(d) === 'jv') (d.lines || []).forEach(function (l) { if (l.a === 'party' && String(l.party || '').trim()) o[key(l.party)] = String(l.party).trim(); });
+    else if (partyName(d)) o[key(partyName(d))] = partyName(d);
+    return o;
+  }
+
   /* the business's records in date order (same date: sales and bills before money, so a same-day payment settles them) */
-  var ORDER = { ob: 0, sale: 1, sdeb: 1, buy: 1, exp: 1, sret: 2, pret: 2, 'in': 3, out: 3, outexp: 3, refund: 3, contra: 4 };
+  var ORDER = { ob: 0, sale: 1, sdeb: 1, buy: 1, exp: 1, fabuy: 1, sret: 2, pret: 2, 'in': 3, out: 3, outexp: 3, refund: 3, fasale: 3, contra: 4, jv: 5 };
   function inBooks(docs, biz) {
     var b = key(biz);
     return docs.filter(function (d) { return role(d) && (!b || bizOf(d) === b); }).sort(function (x, y) {
@@ -144,13 +214,15 @@
   function parties(docs, biz) {
     var out = {};
     inBooks(docs, biz).forEach(function (d) {
-      var nm = partyName(d); if (!nm) return;
-      var k = key(nm), mine = postings(d).filter(function (l) { return l.a === 'p:' + k; });
-      if (!mine.length) return;   /* e.g. a voucher paid straight as an expense */
-      var p = out[k] || (out[k] = { key: k, name: nm, bal: 0, n: 0, last: '' });
-      mine.forEach(function (l) { p.bal = r2(p.bal + l.dr - l.cr); });
-      p.n++; p.last = d.date || p.last;
-      if (d.buyer && d.buyer.phone) p.phone = d.buyer.phone;
+      var pp = partiesOf(d), L = postings(d);
+      Object.keys(pp).forEach(function (k) {
+        var nm = pp[k], mine = L.filter(function (l) { return l.a === 'p:' + k; });
+        if (!mine.length) return;   /* e.g. a voucher paid straight as an expense */
+        var p = out[k] || (out[k] = { key: k, name: nm, bal: 0, n: 0, last: '' });
+        mine.forEach(function (l) { p.bal = r2(p.bal + l.dr - l.cr); });
+        p.n++; p.last = d.date || p.last;
+        if (d.buyer && d.buyer.phone) p.phone = d.buyer.phone;
+      });
     });
     return out;
   }
@@ -169,7 +241,7 @@
      Receivable bills: sales, debit notes, opening 'recv'. Payable bills: purchase bills, self invoices, expenses on credit, opening 'pay'.
      Money and returns go first to the bills they name (alloc / orig no.), then to the oldest bill on the same side. */
   function bills(docs, biz, partyKey) {
-    var list = inBooks(docs, biz).filter(function (d) { return !partyKey || key(partyName(d)) === partyKey; });
+    var list = inBooks(docs, biz).filter(function (d) { return !partyKey || partiesOf(d)[partyKey]; });
     var open = {}, byId = {}, credits = [];
     function pk(d) { return key(partyName(d)); }
     function bill(d, side, amt) {
@@ -179,7 +251,19 @@
     }
     list.forEach(function (d) {
       var R = role(d), t;
+      if (R === 'jv') {   /* journal lines on a party: a new bill or money-like credit, by the side the line was made for */
+        (d.lines || []).forEach(function (l, i) {
+          if (l.a !== 'party' || !String(l.party || '').trim()) return;
+          var k = key(l.party), pay = l.side === 'pay', x = { id: d.id + '#' + i, no: d.no, date: d.date, due: '', type: 'jv', buyer: { name: String(l.party).trim() } };
+          if (partyKey && k !== partyKey) return;
+          if (num(l.dr)) { if (pay) credits.push({ side: 'pay', amt: num(l.dr), d: x }); else bill(x, 'recv', num(l.dr)); }
+          if (num(l.cr)) { if (pay) bill(x, 'pay', num(l.cr)); else credits.push({ side: 'recv', amt: num(l.cr), d: x }); }
+        });
+        return;
+      }
       if (!partyName(d)) return;
+      if (R === 'fabuy') { if (d.mode === 'credit') bill(d, 'pay', num(d.amount) + num(d.gstAmt)); return; }
+      if (R === 'fasale') { if (d.mode === 'credit') bill(d, 'recv', num(d.amount) + num(d.gstAmt)); return; }
       if (R === 'sale') { t = itemTotals(d).total; bill(d, 'recv', t); if (d.status === 'paid' && !d.paidBy) credits.push({ side: 'recv', amt: t, to: d.id, date: d.date }); }
       else if (R === 'sdeb') bill(d, 'recv', itemTotals(d).total);
       else if (R === 'buy') {
@@ -217,18 +301,27 @@
   }
 
   function daysBetween(a, b) { return Math.round((new Date(b + 'T00:00:00') - new Date(a + 'T00:00:00')) / 864e5); }
-  /* ageing buckets by days since the bill date: 0-30, 31-60, 61-90, 90+ */
-  function ageing(openBills, today) {
+  /* ageing buckets by days since the bill date: 0-30, 31-60, 61-90, 90+.
+     byDue: a bill with a due date (credit days) ages from its due date instead, so a bill not due yet stays in the first bucket */
+  function ageing(openBills, today, byDue) {
     var B = [0, 0, 0, 0];
-    openBills.forEach(function (b) { var n = daysBetween(b.date, today); B[n <= 30 ? 0 : n <= 60 ? 1 : n <= 90 ? 2 : 3] = r2(B[n <= 30 ? 0 : n <= 60 ? 1 : n <= 90 ? 2 : 3] + b.left); });
+    openBills.forEach(function (b) { var n = daysBetween(byDue && b.due ? b.due : b.date, today), i = n <= 30 ? 0 : n <= 60 ? 1 : n <= 90 ? 2 : 3; B[i] = r2(B[i] + b.left); });
     return B;
   }
+  /* what is past its due date: bills with a due date after it, bills without one after the party's credit days (cdays) if given */
+  function overdue(openBills, today, cdays) {
+    return r2(openBills.reduce(function (a, b) {
+      var due = b.due || (cdays ? addDays(b.date, cdays) : '');
+      return due && due < today ? a + b.left : a;
+    }, 0));
+  }
+  function addDays(iso, n) { var d = new Date(iso + 'T00:00:00'); d.setDate(d.getDate() + (+n || 0)); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
 
   /* statement of account of one party between two dates: opening, rows with running balance, closing */
   function statement(docs, biz, partyKey, from, to) {
     var acct = 'p:' + partyKey, open = 0, rows = [], bal;
     inBooks(docs, biz).forEach(function (d) {
-      if (key(partyName(d)) !== partyKey) return;
+      if (!partiesOf(d)[partyKey]) return;
       var dr = 0, cr = 0;
       postings(d).forEach(function (l) { if (l.a === acct) { dr += l.dr; cr += l.cr; } });
       dr = r2(dr); cr = r2(cr);
@@ -260,6 +353,6 @@
   }
 
   var API = { num: num, r2: r2, key: key, role: role, itemTotals: itemTotals, postings: postings, inBooks: inBooks, parties: parties, accounts: accounts,
-    bills: bills, ageing: ageing, statement: statement, book: book, daysBetween: daysBetween, moneyAcct: moneyAcct, payAcct: payAcct, bounced: bounced, partyName: partyName };
+    bills: bills, ageing: ageing, overdue: overdue, chargeLines: chargeLines, tcsRate: tcsRate, tcsPan: tcsPan, panOk: panOk, addDays: addDays, mainRate: mainRate, statement: statement, book: book, daysBetween: daysBetween, moneyAcct: moneyAcct, payAcct: payAcct, bounced: bounced, partyName: partyName, partiesOf: partiesOf, jvAcct: jvAcct };
   if (typeof module !== 'undefined' && module.exports) module.exports = API; else G.NSBooks = API;
 })(this);

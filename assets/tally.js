@@ -154,7 +154,7 @@
     }).join(''));
   }
   function vouchersXml(vs) {
-    var bills = $('#ty-bills', box).checked;
+    var bills = $('#ty-bills', box) ? $('#ty-bills', box).checked : true;   /* outside the Tally page (acct.js): bill-wise on, as the page's default */
     return envelope('Vouchers', vs.map(function (v) {
       var party = 'p:' + B.key(v.party || 'cash customer');
       return '   <VOUCHER VCHTYPE="' + x(v.type) + '" ACTION="Create" OBJVIEW="Accounting Voucher View">\n    <DATE>' + ymd(v.date) + '</DATE>\n    <VOUCHERTYPENAME>' + x(v.type) + '</VOUCHERTYPENAME>\n' +
