@@ -12,7 +12,7 @@
      self                        purchase from an unregistered supplier (supplier is owed the taxable value; GST on reverse charge)
      pbill bill / return         purchase bill from a supplier (we owe it) / purchase return (we owe less)
      exp                         expense; mode 'credit' = not paid yet (we owe the payee)
-     ob                          opening balance of a party: side 'recv' (they owe us) or 'pay' (we owe them)
+     ob                          opening balance: side 'recv' (a party owes us), 'pay' (we owe a party), 'cash' or 'bank' (no party)
      contra                      cash deposited in the bank (from 'cash', to 'bank') or withdrawn (from 'bank', to 'cash')
    chq: { date, bank, st, on } on a receipt or voucher paid by cheque: st 'hand' (received, not deposited), 'dep' (deposited),
      'iss' (issued by us), 'ok' (cleared on date 'on'), 'bounce' (bounced: the record is left out of the books, so its bills are due again).
@@ -64,6 +64,8 @@
       case 'resto': return d.status === 'open' ? '' : 'sale';   /* restaurant: a running table is not a sale yet */
       case 'lr': return 'sale';   /* bilty: freight earned; the payer is the customer */
       case 'fee': return 'sale';   /* fee receipt: fees received (status paid) */
+      case 'job': return d.print === 'bill' ? 'sale' : '';   /* job card: a sale once it is a service bill */
+      case 'rabill': return 'sale';   /* contractor RA bill: value of work in this bill (retention and TDS settle at payment) */
       case 'note': return d.kind === 'debit' ? 'sdeb' : 'sret';
       case 'receipt': return d.kind === 'ref' ? 'refund' : 'in';
       case 'voucher': return d.forBill ? 'out' : 'outexp';
@@ -123,7 +125,8 @@
       amt = num(d.amount); dr(d.to === 'cash' ? 'cash' : 'bank', amt); cr(d.from === 'bank' ? 'bank' : 'cash', amt);
     } else if (R === 'ob') {
       amt = num(d.amount);
-      if (d.side === 'pay') { dr('opening', amt); cr(P, amt); } else { dr(P, amt); cr('opening', amt); }
+      if (d.side === 'cash' || d.side === 'bank') { dr(d.side, amt); cr('opening', amt); }   /* cash in hand / bank balance on the start date */
+      else if (d.side === 'pay') { dr('opening', amt); cr(P, amt); } else { dr(P, amt); cr('opening', amt); }
     }
     return L;
   }
@@ -184,7 +187,7 @@
         if (d.type === 'self' && d.status === 'sipaid') credits.push({ side: 'pay', amt: t.taxable, to: d.id, date: d.date });
       }
       else if (R === 'exp' && d.mode === 'credit') bill(d, 'pay', num(d.amount));
-      else if (R === 'ob') bill(d, d.side === 'pay' ? 'pay' : 'recv', num(d.amount));
+      else if (R === 'ob' && d.side !== 'cash' && d.side !== 'bank') bill(d, d.side === 'pay' ? 'pay' : 'recv', num(d.amount));
       else if (R === 'in') credits.push({ side: 'recv', amt: num(d.amount) + num(d.tds), alloc: d.alloc, d: d });
       else if (R === 'sret') credits.push({ side: 'recv', amt: itemTotals(d).total, origNo: d.orig && d.orig.no, d: d });
       else if (R === 'refund') bill(d, 'recv', num(d.amount));   /* a refund paid out makes the customer "owe" it back against their advance */
