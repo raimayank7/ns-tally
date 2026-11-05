@@ -1,5 +1,5 @@
-const CACHE = 'ns-tally-6556efa70d';
-const SHELL = ["/", "/assets/base.css?v=1f0da92ce6", "/assets/doc.css?v=757271abe2", "/assets/i18n.js?v=6574a6d756", "/assets/store.js?v=9c08ccd732", "/assets/core.js?v=ce1a7fae7a", "/assets/safe.js?v=69ce2e3766", "/assets/help.js?v=ddaed68b26", "/assets/books.js?v=c16d2ce560", "/assets/extras.js?v=857c723793", "/assets/xlsx.js?v=9c9abd01b6", "/assets/tally.js?v=ee678a5e5a", "/assets/safe.css?v=f3b3edd6eb", "/assets/desk.js?v=9a150c505b", "/assets/desk.css?v=7ad1a8e611", "/assets/contact.js?v=d065ca16d0", "/assets/acct.js?v=78527f0909"];
+const CACHE = 'ns-tally-5677e467cd';
+const SHELL = ["/", "/assets/base.css?v=b52531f5f3", "/assets/doc.css?v=757271abe2", "/assets/i18n.js?v=f1da4f4734", "/assets/store.js?v=85f91703b6", "/assets/core.js?v=1e422d36da", "/assets/safe.js?v=69ce2e3766", "/assets/help.js?v=ddaed68b26", "/assets/books.js?v=c16d2ce560", "/assets/extras.js?v=857c723793", "/assets/xlsx.js?v=9c9abd01b6", "/assets/tally.js?v=ee678a5e5a", "/assets/safe.css?v=f3b3edd6eb", "/assets/desk.js?v=c37a817fa1", "/assets/desk.css?v=0a5d41d8e0", "/assets/contact.js?v=d065ca16d0", "/assets/acct.js?v=78527f0909"];
 self.addEventListener('install', e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).then(() => self.skipWaiting())); });
 self.addEventListener('activate', e => { e.waitUntil(caches.keys().then(k => Promise.all(k.filter(n => n.startsWith('ns-') && n !== CACHE).map(n => caches.delete(n)))).then(() => self.clients.claim())); });
 self.addEventListener('fetch', e => {
