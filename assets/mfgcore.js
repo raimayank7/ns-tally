@@ -151,7 +151,7 @@
           out.push(Object.assign({}, d, { kind: 'make', gd: place, by: null, lines: back.map(function (l) { return { desc: l.desc, unit: l.unit, qty: num(l.back) }; }), out: d.out, _job: 'in' }));
           out.push(Object.assign({}, d, { kind: 'move', from: place, to: d.gd || '', lines: [{ desc: d.out.desc, unit: d.out.unit, qty: num(d.out.qty), batch: d.out.batch || '' }], _job: 'in' }));
         } else if (back.length) out.push(Object.assign({}, d, { kind: 'move', from: place, to: d.gd || '', lines: back.map(function (l) { return { desc: l.desc, unit: l.unit, qty: num(l.back) }; }), _job: 'in' }));
-        if (lost.length) out.push(Object.assign({}, d, { kind: 'adj', gd: place, lines: lost.map(function (l) { return { desc: l.desc, unit: l.unit, qty: -num(l.lost), reason: 'lost' }; }), _job: 'lost' }));
+        if (lost.length) out.push(Object.assign({}, d, { kind: 'adj', gd: place, lines: lost.map(function (l) { return { desc: l.desc, unit: l.unit, qty: -num(l.lost), reason: 'jwloss' }; }), _job: 'lost' }));
         return;
       }
       out.push(d);

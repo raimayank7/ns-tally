@@ -29,7 +29,7 @@
   function r2(n) { return Math.round((n + Number.EPSILON) * 100) / 100; }
   function r3(n) { return Math.round((n + Number.EPSILON) * 1000) / 1000; }
   function key(s) { return String(s || '').trim().toLowerCase().replace(/\s+/g, ' '); }
-  var OUTR = { damage: 1, own: 1, sample: 1, gift: 1, lost: 1, expired: 1, short: 1 };
+  var OUTR = { damage: 1, own: 1, sample: 1, gift: 1, lost: 1, expired: 1, short: 1, jwloss: 1 };   /* jwloss: loss and waste at the job worker (ITC-04), not theft */
   var INR = { found: 1, extra: 1 };
 
   function bizOf(d) { return key(d.seller && d.seller.name); }
@@ -279,7 +279,7 @@
         if (!gdOk(x, o.gd)) return;
         bal = r3(bal + x.qty);
         if (o.from && x.date < o.from) { open = bal; return; }
-        var vt = VT[x.src] || x.src, cc = cost(), row = { date: x.date, vt: vt, src: x.src, reason: x.reason, no: x.d.no || x.d.billNo || '', party: partyOf(x),
+        var vt = x.d && x.d._job ? 'job' : VT[x.src] || x.src, cc = cost(), row = { date: x.date, vt: vt, src: x.src, reason: x.reason, no: x.d.no || x.d.billNo || '', party: partyOf(x),
           inq: x.qty > 0 ? x.qty : 0, outq: x.qty < 0 ? -x.qty : 0, bal: bal, cost: cc, value: bal > 0 ? r2(bal * cc) : 0, neg: bal < 0, batch: x.batch, x: x };
         if (row.neg) neg++;
         if (o.types && !o.types[vt]) return;
@@ -320,7 +320,7 @@
     function put(B, x, q) {
       B.bal = r3(B.bal + q);
       if (from && x.date < from) { B.open = B.bal; return; }
-      var r = { date: x.date, vt: VT[x.src] || x.src, src: x.src, reason: x.reason, no: x.d.no || x.d.billNo || '', party: partyOf(x), inq: q > 0 ? q : 0, outq: q < 0 ? -q : 0, bal: B.bal, neg: B.bal < 0, x: x };
+      var r = { date: x.date, vt: x.d && x.d._job ? 'job' : VT[x.src] || x.src, src: x.src, reason: x.reason, no: x.d.no || x.d.billNo || '', party: partyOf(x), inq: q > 0 ? q : 0, outq: q < 0 ? -q : 0, bal: B.bal, neg: B.bal < 0, x: x };
       B.inq = r3(B.inq + r.inq); B.outq = r3(B.outq + r.outq); B.rows.push(r);
     }
     moves(docs, items, biz).forEach(function (x) {
@@ -353,7 +353,9 @@
       if (!a.first) a.first = x.date;
       if (x.src !== 'open') a.lastMove = x.date;
       if (x.src === 'sale') a.lastSale = x.date;
-      if ((x.src === 'sale' || x.src === 'sret') && (!from || x.date >= from)) a.sold = r3(a.sold - x.qty);
+      /* raw material used in production moves too: a manufacturer's sheet and handles are not "slow" (round C) */
+      if ((x.src === 'sale' || x.src === 'sret' || x.src === 'use') && (!from || x.date >= from)) a.sold = r3(a.sold - x.qty);
+      if (x.src === 'use' && (!a.lastSale || x.date > a.lastSale)) a.lastSale = x.date;
     });
     var span = from && to ? Math.max(1, Math.round((Date.parse(to) - Date.parse(from)) / 864e5) + 1) : 0;
     var cut = to ? new Date(Date.parse(to + 'T00:00:00Z') - days * 864e5).toISOString().slice(0, 10) : '';

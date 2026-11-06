@@ -45,6 +45,8 @@
     var code = String(k || '').indexOf('exp:') === 0 ? String(k).slice(4) : '';
     if (DIRECT_CODES[code]) return true;
     if (INDIRECT_CODES[code]) return false;   /* the App's own heads: office salary, office electricity ... */
+    var H = G.NSHeads || (typeof NSHeads !== 'undefined' ? NSHeads : null), hh = H && H.find(name || code);   /* the heads list (heads.js) knows its type */
+    if (hh && !H.isIncome(hh)) return hh.t === 'dexp';
     var n = key(name) + ' ' + key(code);
     if (/office|admin|sales|selling|outward/.test(n)) return false;
     return DIRECT_RE.test(n);
@@ -148,9 +150,12 @@
         L.push({ t: 'cap', name: c.name, own: owners[c.k] && owners[c.k].row, v: c.close, parts: p });
       });
       /* capital not in a partner's account (an old 'Capital' line, earlier profit) and any gap between the two profit figures */
-      var rest = r2(otherCap + res), q = [];
-      list.forEach(function (o) { if (!inF[o.k]) rest = r2(rest + o.open + o.add - o.drw); });
+      /* capital brought in (or taken out) during the period stays visible as such, not folded into "Opening balance" (round C) */
+      var rest = r2(otherCap + res), q = [], add2 = 0, drw2 = 0;
+      list.forEach(function (o) { if (!inF[o.k]) { rest = r2(rest + o.open); add2 = r2(add2 + o.add); drw2 = r2(drw2 + o.drw); } });
       if (rest) q.push({ t: 'capopen', v: rest });
+      if (add2) q.push({ t: 'capadd', v: add2 });
+      if (drw2) q.push({ t: 'capdrw', v: -drw2 });
       var gap = r2(net - num(opt.firm.appr && opt.firm.appr.profit));
       if (gap) q.push({ t: gap < 0 ? 'capnl' : 'capnp', v: gap });
       otherDrw.forEach(function (y) { q.push({ t: 'capdrw', row: y.row, v: -y.v }); });
@@ -188,7 +193,10 @@
     }
     aLine('inv', grp.ninv);
     A.push({ t: 'csk', v: cs });
-    if (grp.trec.length) A.push({ t: 'debt', v: sum(rowsOf(grp.trec)), row: grp.trec[0] });
+    if (grp.trec.length) {   /* sundry debtors, less the provision for doubtful debts (WP-3) */
+      var pdr = grp.trec.filter(function (x) { return x.k === 'pdd'; })[0], dv = sum(rowsOf(grp.trec));
+      A.push(pdr && amt(pdr) ? { t: 'debt', v: dv, row: grp.trec.filter(function (x) { return x.k !== 'pdd'; })[0] || pdr, pdd: -amt(pdr), gross: r2(dv - amt(pdr)) } : { t: 'debt', v: dv, row: grp.trec[0] });
+    }
     aLine('cash', grp.cash); aLine('chq', grp.chq); aLine('bank', grp.bank);
     aLine('adv', grp.oca); aLine('gstin', grp.gstin); aLine('tdsr', grp.tdsr);
     var tl = sum(L), ta = sum(A);
