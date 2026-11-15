@@ -76,12 +76,16 @@
       if (ty === 'stk') src = d.kind === 'open' ? 'open' : 'adj';
       else if (ty === 'pbill') { src = d.kind === 'return' ? 'pret' : 'buy'; sign = d.kind === 'return' ? -1 : 1; }
       else if (ty === 'self') { src = 'buy'; sign = 1; }
-      else if (ty === 'invoice' || ty === 'cashmemo') { src = 'sale'; sign = -1; }
+      else if (ty === 'invoice' || ty === 'cashmemo' || ty === 'jewel' || ty === 'garment') { src = 'sale'; sign = -1; }   /* jewel: stock by weight under it.stk; old gold taken in comes in below */
       else if (ty === 'note' && d.side === 'purchase') { if (d.kind === 'debit' && d.reason === 'ret') { src = 'pret'; sign = -1; } }   /* goods sent back to the supplier */
       else if (ty === 'note' && d.kind !== 'debit' && d.reason === 'ret') { src = 'sret'; sign = 1; }
+      if (ty === 'jewel') (d.oldGold || []).forEach(function (x) {   /* old gold / silver taken in exchange: stock in at the value paid for it */
+        var nm = String(x.stk || '').trim(), q = num(x.net); if (!nm || !(q > 0)) return;
+        out.push(mv(key(nm), nm, 'g', d, q, r2(num(x.value) / q), 'buy', '', d.gd, x));
+      });
       if (!src) return;
       (src === 'open' || src === 'adj' ? d.lines : d.items || []).forEach(function (it) {
-        var nm = String(it.desc || '').trim(); if (!nm) return;
+        var nm = String(it.stk || it.desc || '').trim(); if (!nm) return;   /* it.stk: jewellery keeps stock under metal and purity, not the ornament's name */
         var k = key(nm), m = M[k];
         if (isService(m, it)) return;
         var q, rate = null;
