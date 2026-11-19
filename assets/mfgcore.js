@@ -29,10 +29,62 @@
   function jwPlace(w) { return JW + String(w && w.name || w || '').trim(); }
   function isJw(g) { return String(g || '').indexOf(JW) === 0; }
 
-  /* ---------- alternate units ---------- */
-  function altOf(m) { var a = m && m.alt; return a && a.unit && num(a.per) > 0 && key(a.unit) !== key(m.unit) ? { unit: a.unit, per: num(a.per) } : null; }
+  /* ---------- alternate units ----------
+     ERP round 1 (I-3): an item may have several other units (item.alts = [{ unit, per }], 1 unit = per base units; the older
+     item.alt is read as the first one), and the unit master (data home meta 'units' = [{ sym, name, uqc, dec, compound:
+     { per, second } }]: 1 sym = per second) plus a few fixed conversions (1 Kg = 1000 Gm, 1 Dozen = 12 Nos ...) convert any
+     unit into the item's base unit. A line in a unit that none of these converts is "not a unit of this item" (unitOk false):
+     the stock register flags it and the makers refuse it for goods items. Pages pass the unit master in with setUnits(list). */
+  var USYN = { no: 'nos', number: 'nos', numbers: 'nos', pc: 'pcs', piece: 'pcs', pieces: 'pcs', kgs: 'kg', kilogram: 'kg', g: 'gm', gms: 'gm', gram: 'gm', grams: 'gm',
+    l: 'ltr', ltrs: 'ltr', litre: 'ltr', liter: 'ltr', litres: 'ltr', m: 'mtr', mtrs: 'mtr', metre: 'mtr', meter: 'mtr', boxes: 'box', bags: 'bag', strips: 'strip',
+    bottles: 'bottle', btl: 'bottle', pkt: 'pack', packet: 'pack', packs: 'pack', dozens: 'dozen', doz: 'dozen', dz: 'dozen', tonne: 'ton', tons: 'ton', mt: 'ton', quintal: 'qtl',
+    ctn: 'carton', cartons: 'carton', sets: 'set', pairs: 'pair', rolls: 'roll', cms: 'cm', mls: 'ml', 'sq. ft': 'sq ft', sqft: 'sq ft', 'sq.ft': 'sq ft' };
+  function ukey(u) { var k = key(u).replace(/\.$/, ''); return USYN[k] || k; }
+  var FIXED = [['kg', 1000, 'gm'], ['ltr', 1000, 'ml'], ['ton', 1000, 'kg'], ['qtl', 100, 'kg'], ['dozen', 12, 'nos'], ['dozen', 12, 'pcs'], ['mtr', 100, 'cm'], ['km', 1000, 'mtr']];
+  var UPAIRS = FIXED.slice(), UMASTER = [];
+  function setUnits(list) {
+    UMASTER = (list || []).filter(function (u) { return u && u.sym; });
+    UPAIRS = FIXED.slice();
+    UMASTER.forEach(function (u) { var c = u.compound; if (c && c.second && num(c.per) > 0 && ukey(c.second) !== ukey(u.sym)) UPAIRS.push([ukey(u.sym), num(c.per), ukey(c.second)]); });
+    return UMASTER;
+  }
+  function unitMaster() { return UMASTER; }
+  function altsOf(m) {
+    if (!m) return [];
+    var seen = {}, out = [], base = ukey(m.unit);
+    [].concat(m.alt ? [m.alt] : [], m.alts || []).forEach(function (a) {
+      var u = a && ukey(a.unit); if (!u || u === base || seen[u] || !(num(a.per) > 0)) return;
+      seen[u] = 1; out.push({ unit: String(a.unit).trim(), per: num(a.per) });
+    });
+    return out;
+  }
+  function altOf(m) { var a = altsOf(m); return a.length ? a[0] : null; }
+  /* base units in one `u` through the unit master / fixed conversions (one step, either way), or 0 when there is none */
+  function pairFactor(u, base) {
+    for (var i = 0; i < UPAIRS.length; i++) { var p = UPAIRS[i]; if (p[0] === u && p[2] === base) return p[1]; if (p[2] === u && p[0] === base) return 1 / p[1]; }
+    return 0;
+  }
   /* how many base units one `unit` of this item is (1 when it is the base unit or unknown) */
-  function factor(m, unit) { var a = altOf(m); return a && unit && key(unit) === key(a.unit) ? a.per : 1; }
+  function factor(m, unit) {
+    if (!m || !unit) return 1;
+    var u = ukey(unit), base = ukey(m.unit); if (!base || u === base) return 1;
+    var a = altsOf(m).filter(function (x) { return ukey(x.unit) === u; })[0]; if (a) return a.per;
+    return pairFactor(u, base) || 1;
+  }
+  /* is `unit` the item's base unit, one of its other units, or convertible into it? (no item / no unit = nothing to check) */
+  function unitOk(m, unit) {
+    if (!m || !String(unit || '').trim() || !String(m.unit || '').trim()) return true;
+    var u = ukey(unit), base = ukey(m.unit);
+    return u === base || altsOf(m).some(function (x) { return ukey(x.unit) === u; }) || !!pairFactor(u, base);
+  }
+  /* the units a line of this item may use: base first, then its own other units, then units the master converts */
+  function unitsOf(m) {
+    if (!m || !m.unit) return [];
+    var base = ukey(m.unit), out = [m.unit], seen = {}; seen[base] = 1;
+    altsOf(m).forEach(function (a) { var k = ukey(a.unit); if (!seen[k]) { seen[k] = 1; out.push(a.unit); } });
+    UPAIRS.forEach(function (p) { var o = p[0] === base ? p[2] : p[2] === base ? p[0] : ''; if (o && !seen[o]) { seen[o] = 1; var mu = UMASTER.filter(function (x) { return ukey(x.sym) === o; })[0]; out.push(mu ? mu.sym : o.charAt(0).toUpperCase() + o.slice(1)); } });
+    return out;
+  }
   /* a line in either unit -> the same line in the base unit (qty × per, rate ÷ per) */
   function toBase(m, it, qk) {
     var ks = [].concat(qk || 'qty'), f = factor(m, it && it.unit); if (f === 1) return it;
@@ -47,7 +99,7 @@
     var s = q < 0 ? -1 : 1, x = Math.abs(q), whole = Math.floor(r3(x / a.per) + 1e-9), rest = r3(x - whole * a.per);
     return { a: s * whole, b: s * rest, unit: a.unit, base: m.unit || '', per: a.per };
   }
-  function altText(m, q) { var s = split(m, q); if (!s) return ''; return s.a + ' ' + s.unit + (s.b ? ' + ' + s.b + ' ' + s.base : ''); }
+  function altText(m, q) { var s = split(m, q); if (!s || !s.a) return ''; return s.a + ' ' + s.unit + (s.b ? ' + ' + s.b + ' ' + s.base : ''); }
 
   /* ---------- BOM versions ---------- */
   function bomList(m) {
@@ -133,12 +185,12 @@
   /* ---------- records for the stock register ---------- */
   function conv(M, arr, qk) { return (arr || []).map(function (it) { return toBase(M[key(it && it.desc)], it, qk); }); }
   function expand(docs, items) {
-    var M = byName(items), out = [], any = (items || []).some(altOf);
+    var M = byName(items), out = [], any = true;   /* every line in another unit becomes base units (I-3: units of the unit master too) */
     (docs || []).forEach(function (d) {
       if (!d) return;
       if (any && d.type !== 'stk' && d.items) { d = Object.assign({}, d, { items: conv(M, d.items) }); }
       if (d.type !== 'stk') { out.push(d); return; }
-      if (any) { d = Object.assign({}, d); if (d.lines) d.lines = conv(M, d.lines, d.kind === 'jobin' ? ['back', 'lost'] : 'qty'); if (d.out && d.out.desc) d.out = toBase(M[key(d.out.desc)], d.out); if (d.by) d.by = conv(M, d.by); }
+      if (any) { d = Object.assign({}, d); if (d.lines) d.lines = conv(M, d.lines, d.kind === 'jobin' ? ['back', 'lost'] : 'qty'); if (d.out && d.out.desc) d.out = toBase(M[key(d.out.desc)], d.out); if (d.by) d.by = conv(M, d.by); if (d.items && /^(grn|rejin|rejout)$/.test(d.kind || '')) d.items = conv(M, d.items); }
       if (d.kind === 'make' && (d.by || []).length) {
         out.push(d);
         d.by.forEach(function (b) { if (b.desc && num(b.qty)) out.push(Object.assign({}, d, { by: null, lines: [], out: { desc: b.desc, unit: b.unit, qty: num(b.qty), rate: num(b.rate), batch: '' }, _by: 1 })); });
@@ -186,7 +238,7 @@
   var UQC = { nos: 'NOS', no: 'NOS', number: 'NOS', numbers: 'NOS', pcs: 'PCS', pc: 'PCS', piece: 'PCS', pieces: 'PCS', kg: 'KGS', kgs: 'KGS', kilogram: 'KGS', g: 'GMS', gm: 'GMS', gms: 'GMS', gram: 'GMS',
     box: 'BOX', boxes: 'BOX', mtr: 'MTR', m: 'MTR', metre: 'MTR', meter: 'MTR', ltr: 'LTR', l: 'LTR', litre: 'LTR', liter: 'LTR', ml: 'MLT', bag: 'BAG', bags: 'BAG', set: 'SET', sets: 'SET',
     doz: 'DOZ', dozen: 'DOZ', ton: 'TON', tonne: 'TON', mt: 'MTS', qtl: 'QTL', quintal: 'QTL', sqm: 'SQM', sqft: 'SQF', 'sq ft': 'SQF', roll: 'ROL', rolls: 'ROL', pack: 'PAC', pkt: 'PAC', packet: 'PAC',
-    btl: 'BTL', bottle: 'BTL', ctn: 'CTN', carton: 'CTN', pair: 'PRS', pairs: 'PRS', bundle: 'BDL', bdl: 'BDL', can: 'CAN', drum: 'DRM', tube: 'TUB', unit: 'UNT', units: 'UNT', cm: 'CMS', km: 'KME' };
+    btl: 'BTL', bottle: 'BTL', ctn: 'CTN', carton: 'CTN', gross: 'GRS', strip: 'STR', strips: 'STR', pair: 'PRS', pairs: 'PRS', bundle: 'BDL', bdl: 'BDL', can: 'CAN', drum: 'DRM', tube: 'TUB', unit: 'UNT', units: 'UNT', cm: 'CMS', km: 'KME' };
   function uqc(u) { var k = key(u).replace(/\.$/, ''); return UQC[k] || (/^[A-Z]{3}$/.test(String(u || '').trim()) ? String(u).trim() : 'OTH'); }
   function stateOf(p) { var g = String(p && p.gstin || '').trim(); return /^\d{2}/.test(g) ? g.slice(0, 2) : String(p && p.state || '').trim(); }
   /* filing periods of a financial year 'YYYY-YY': half-yearly (AATO above Rs 5 crore) or the whole year */
@@ -222,5 +274,6 @@
   var API = { num: num, r2: r2, r3: r3, key: key, JW: JW, jwPlace: jwPlace, isJw: isJw, altOf: altOf, factor: factor, toBase: toBase, split: split, altText: altText,
     bomList: bomList, pickBom: pickBom, saveVersion: saveVersion, dropVersion: dropVersion, explode: explode, bomLoop: bomLoop, byValue: byValue, makeTotals: makeTotals,
     expand: expand, pending: pending, periods: periods, itc04: itc04, uqc: uqc, stateOf: stateOf, addYears: addYears, days: days };
+  API.setUnits = setUnits; API.unitMaster = unitMaster; API.altsOf = altsOf; API.unitOk = unitOk; API.unitsOf = unitsOf; API.ukey = ukey; API.FIXED = FIXED;   /* I-3 */
   if (typeof module !== 'undefined' && module.exports) module.exports = API; else G.NSMfg = API;
 })(this);

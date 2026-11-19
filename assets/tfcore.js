@@ -130,7 +130,7 @@
       else if (x.g === 'ppe') grp.ppe.push(x);
       else if (x.g === 'ninv') grp.ninv.push(x);
       else if (x.g === 'trec') grp.trec.push(x);
-      else if (x.g === 'cash') (x.k === 'bank' ? grp.bank : x.k === 'chq-in' ? grp.chq : grp.cash).push(x);
+      else if (x.g === 'cash') (/^bank(:|$)/.test(x.k) ? grp.bank : x.k === 'chq-in' ? grp.chq : grp.cash).push(x);
       else if (x.g === 'oca') (x.k === 'gst' || /^gst-/.test(x.k) ? grp.gstin : x.k === 'tds-receivable' ? grp.tdsr : grp.oca).push(x);
     });
     /* owners whose name came only from drawings */
