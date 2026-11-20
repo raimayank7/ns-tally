@@ -516,3 +516,4 @@ html.ns-soft dialog.vs[open],html.ns-soft dialog.vs[open]::backdrop{animation:no
 /* the toolbar buttons: the key shows as a small label under the button, outside the row, so nothing moves */
 .mb-t{position:relative}.mb-t kbd{display:none;position:absolute;top:calc(100% + 4px);left:50%;transform:translateX(-50%);z-index:60;background:var(--surface);white-space:nowrap;box-shadow:0 4px 12px rgba(0,0,0,.3);pointer-events:none}
 .mb-t:is(:hover,:focus-visible) kbd{display:block}
+.mb-drop a span{flex:1 0 auto;overflow:visible;text-overflow:clip}
