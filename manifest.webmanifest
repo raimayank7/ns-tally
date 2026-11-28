@@ -2,7 +2,7 @@
  "id": "/",
  "name": "Nivesh Sahayak Tally Export",
  "short_name": "NS Tally Export",
- "description": "Free TallyPrime import file maker",
+ "description": "Free Excel and bank statement to Tally XML converter",
  "start_url": "/",
  "scope": "/",
  "display": "standalone",
